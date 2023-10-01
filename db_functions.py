@@ -59,3 +59,28 @@ def fetch_all_songs_from_database_table(table, database=app_database):
     connection.close()
 
     return data
+
+
+# Get all tables in the database
+def get_playlist_tables():
+    try:
+        connection = sqlite3.connect(app_database)
+        cursor = connection.cursor()
+        cursor.execute("""SELECT * FROM sqlite_master WHERE type = 'table';""")
+        table_names = cursor.fetchall()
+
+        tables = [table_name[1] for table_name in table_names]
+        return tables
+    except sqlite3.Error as e:
+        print(f"Error getting table names: {e}")
+    finally:
+        connection.close()
+
+
+def delete_database_table(table, database=app_database):
+    connection = sqlite3.connect(app_database)
+    cursor = connection.cursor()
+    cursor.execute(f"""DROP TABLE {table};""")
+    connection.commit()
+    connection.close()
+

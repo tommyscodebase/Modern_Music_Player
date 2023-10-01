@@ -2,15 +2,18 @@ import os.path
 import random
 import time
 
+from PyQt5 import QtWidgets
 from PyQt5.QtGui import QIcon
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, QUrl, QTimer
 
 from db_functions import add_song_to_database_table, create_database_or_database_table, \
-    fetch_all_songs_from_database_table, delete_song_from_database_table, delete_all_songs_from_database_table
+    fetch_all_songs_from_database_table, delete_song_from_database_table, delete_all_songs_from_database_table, \
+    get_playlist_tables, delete_database_table
 from music import Ui_MusicApp
 import songs
+from playlist_popup import PlaylistDialog
 
 
 def create_db_dir():
@@ -33,6 +36,7 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         create_db_dir()
         create_database_or_database_table('favourites')
         self.load_favourites_into_app()
+        self.load_playlists()
 
         # Globals
         global stopped
@@ -70,6 +74,7 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         self.delete_selected_btn.clicked.connect(self.remove_selected_song)
         self.delete_all_songs_btn.clicked.connect(self.remove_all_songs)
 
+        # FAVOURITES
         self.song_list_btn.clicked.connect(self.switch_to_songs_tab)
         self.playlists_btn.clicked.connect(self.switch_to_playlist_tab)
         self.favourites_btn.clicked.connect(self.switch_to_favourites_tab)
@@ -78,6 +83,20 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         self.delete_selected_favourite_btn.clicked.connect(self.remove_song_from_favourites)
         self.delete_all_favourites_btn.clicked.connect(self.remove_all_songs_from_favourites)
 
+        # PLAYLISTS
+        self.new_playlist_btn.clicked.connect(self.new_playlist)
+        self.remove_selected_playlist_btn.clicked.connect(self.delete_playlist)
+        self.remove_all_playlists_btn.clicked.connect(self.delete_all_playlist)
+        self.add_to_playlist_btn.clicked.connect(self.add_song_to_playlist)
+        self.playlists_listWidget.itemDoubleClicked.connect(self.show_playlist_content)
+        try:
+            self.load_selected_playlist_btn.clicked.connect(
+                lambda: self.load_playlist_songs_to_current_queue(
+                    self.playlists_listWidget.currentItem().text()
+                )
+            )
+        except:
+            pass
         self.show()
 
         def moveApp(event):
@@ -465,3 +484,183 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
                 self.load_favourites_into_app()
             except Exception as e:
                 print(f"Removing all songs from favourites error: {e}")
+
+    # PLAYLIST FUNCTIONS
+    # Create a new playlist
+    def new_playlist(self):
+        try:
+            existing = get_playlist_tables()
+            name, _ = QtWidgets.QInputDialog.getText(
+                self, 'Create a new playlist',
+                'Enter Playlist Name:'
+            )
+            if name == '':
+                QMessageBox.information(self, 'Name Error', 'Playlist name cannot be empty')
+                return
+            else:
+                if name not in existing:
+                    # Create the playlist table
+                    create_database_or_database_table(f"{name}")
+                    self.load_playlists()
+                elif name in existing:
+                    try:
+                        caution = QMessageBox.question(
+                            self, 'Replace Playlist',
+                            f"A playlist with the name {name} already exist.\n"
+                            f"Do you want to replace it?",
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                        )
+                        if caution == QMessageBox.Yes:
+                            delete_database_table(f"{name}")
+                            create_database_or_database_table(f"{name}")
+                            self.load_playlists()
+                        else:
+                            return
+                    except Exception as e:
+                        print(f"Replacing playlist error: {e}")
+        except Exception as e:
+            print(f"Creating new playlist error: {e}")
+
+    # Delete a playlist
+    def delete_playlist(self):
+        playlist = self.playlists_listWidget.currentItem().text()
+        try:
+            delete_database_table(playlist)
+        except Exception as e:
+            print(f"Deleting playlist error: {e}")
+        finally:
+            self.load_playlists()
+
+    # Delete all playlists
+    def delete_all_playlist(self):
+        playlists = get_playlist_tables()
+        playlists.remove('favourites')
+        caution = QMessageBox.question(
+            self, 'Delete All Playlist',
+            f"This will delete all playlists and cannot be undone.\nContinue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if caution == QMessageBox.Yes:
+            try:
+                for playlist in playlists:
+                    delete_database_table(playlist)
+            except Exception as e:
+                print('Deleting all playlists error:', e)
+            finally:
+                self.load_playlists()
+
+    # Add a song to a playlist
+    def add_song_to_playlist(self):
+        options = get_playlist_tables()
+        options.remove('favourites')
+        options.insert(0, '--Click to select--')
+        playlist, _ = QtWidgets.QInputDialog.getItem(
+            self, 'Add Song to Playlist',
+            'Choose the desired playlist:', options, editable=False
+        )
+        if playlist == '--Click to select--':
+            QMessageBox.information(self, "Add Song to Playlist", 'No playlist was selected')
+            return
+        try:
+            current_index = self.loaded_songs_listWidget.currentRow()
+            song = songs.current_song_list[current_index]
+        except:
+            QMessageBox.information(self, "Unsuccessful", 'No song was selected')
+            return
+        add_song_to_database_table(song, playlist)
+        self.load_playlists()
+        # QMessageBox.information(self, "Successful", f'{os.path.basename(song)} was successfully added to {playlist}')
+
+    # Add all current songs to a playlist
+    def add_all_current_songs_to_a_playlist(self):
+        options = get_playlist_tables()
+        options.remove('favourites')
+        options.insert(0, '--Click to select--')
+        playlist, _ = QtWidgets.QInputDialog.getItem(
+            self, 'Add Song to Playlist',
+            'Choose the desired playlist:', options, editable=False
+        )
+        if playlist == '--Click to select--':
+            QMessageBox.information(self, "Add Songs to Playlist", 'No playlist was selected')
+            return
+        if len(songs.current_song_list) < 1:
+            QMessageBox.information(
+                self, 'Add Songs to Playlist',
+                'Song List is empty.'
+            )
+            return
+        for song in songs.current_song_list:
+            add_song_to_database_table(song, playlist)
+        self.load_playlists()
+
+    # Add currently playing song to playlist
+    def add_currently_playing_to_a_playlist(self):
+        if not self.player.state() == QMediaPlayer.PlayingState:
+            QMessageBox.information(
+                self, 'Add Song to Playlist',
+                'No song is playing in queue.'
+            )
+            return
+
+        options = get_playlist_tables()
+        options.remove('favourites')
+        options.insert(0, '--Click to select--')
+        playlist, _ = QtWidgets.QInputDialog.getItem(
+            self, 'Add Song to Playlist',
+            'Choose the desired playlist:', options, editable=False
+        )
+        if playlist == '--Click to select--':
+            QMessageBox.information(self, "Add Song to Playlist", 'No playlist was selected')
+            return
+
+        current_media = self.player.media()
+        song = current_media.canonicalUrl().path()[1:]
+        add_song_to_database_table(song, playlist)
+        self.load_playlists()
+
+    # Load playlist songs to current song list
+    def load_playlist_songs_to_current_queue(self, playlist):
+        try:
+            playlist_songs = fetch_all_songs_from_database_table(playlist)
+            if len(playlist_songs) == 0:
+                QMessageBox.information(
+                    self, 'Load playlist songs',
+                    'Playlist is empty.'
+                )
+                return
+            for song in playlist_songs:
+                songs.current_song_list.append(song)
+                self.loaded_songs_listWidget.addItem(
+                    QListWidgetItem(
+                        QIcon(':/img/utils/images/MusicListItem.png'),
+                        os.path.basename(song)
+                    )
+                )
+        except Exception as e:
+            print(f"Loading songs from{playlist} error: {e}")
+
+    # Show Playlist Content
+    def show_playlist_content(self):
+        try:
+            playlist = self.playlists_listWidget.currentItem().text()
+            songs = fetch_all_songs_from_database_table(playlist)
+            songs_only = [os.path.basename(song) for song in songs]
+            playlist_dialog = PlaylistDialog(songs_only, f"{playlist}")
+            playlist_dialog.exec_()
+        except Exception as e:
+            print(f"Showing playlist content error: {e}")
+
+
+
+    # Load playlists into app
+    def load_playlists(self):
+        playlists = get_playlist_tables()
+        playlists.remove('favourites')
+        self.playlists_listWidget.clear()
+        for playlist in playlists:
+            self.playlists_listWidget.addItem(
+                QListWidgetItem(
+                    QIcon(':/img/utils/images/dialog-music.png'),
+                    playlist
+                )
+            )
