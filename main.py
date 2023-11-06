@@ -2,7 +2,7 @@ import os.path
 import random
 import time
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtGui import QIcon
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtWidgets import *
@@ -42,10 +42,12 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         global stopped
         global looped
         global is_shuffled
+        global slide_index
 
         stopped = False
         looped = False
         is_shuffled = False
+        slide_index = 0
 
         # Create the player object
         self.player = QMediaPlayer()
@@ -56,8 +58,14 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         self.timer.start(1000)
         self.timer.timeout.connect(self.move_slider)
 
+        # Context Menus
+        self.playlists_context_menu()
+        self.favourite_songs_context_menu()
+        self.loaded_songs_context_menu()
+
         # Connections
         self.player.mediaStatusChanged.connect(self.song_finished)
+        self.player.mediaChanged.connect(self.slideshow)
         # Default Page
         self.music_slider.sliderMoved[int].connect(
             lambda: self.player.setPosition(self.music_slider.value())
@@ -74,6 +82,13 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         self.delete_selected_btn.clicked.connect(self.remove_selected_song)
         self.delete_all_songs_btn.clicked.connect(self.remove_all_songs)
 
+        # Actions
+        self.actionPlay.triggered.connect(self.play_song)
+        self.actionPause_Unpause.triggered.connect(self.pause_and_unpause)
+        self.actionNext.triggered.connect(self.next_song)
+        self.actionPrevious.triggered.connect(self.previous_song)
+        self.actionStop.triggered.connect(self.stop_song)
+
         # FAVOURITES
         self.song_list_btn.clicked.connect(self.switch_to_songs_tab)
         self.playlists_btn.clicked.connect(self.switch_to_playlist_tab)
@@ -82,6 +97,12 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         self.add_to_fav_btn.clicked.connect(self.add_song_to_favourites)
         self.delete_selected_favourite_btn.clicked.connect(self.remove_song_from_favourites)
         self.delete_all_favourites_btn.clicked.connect(self.remove_all_songs_from_favourites)
+
+        # Favourite Actions
+        self.actionAdd_Selected_to_Favourites.triggered.connect(self.add_song_to_favourites)
+        self.actionAdd_all_to_Favouries.triggered.connect(self.add_all_songs_to_favourites)
+        self.actionRemove_Selected_Favourite.triggered.connect(self.remove_song_from_favourites)
+        self.actionRemove_All_Favourites.triggered.connect(self.remove_all_songs_from_favourites)
 
         # PLAYLISTS
         self.new_playlist_btn.clicked.connect(self.new_playlist)
@@ -95,8 +116,21 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
                     self.playlists_listWidget.currentItem().text()
                 )
             )
+            self.actionLoad_Selected_Playlist.triggered.connect(
+                lambda: self.load_playlist_songs_to_current_queue(
+                    self.playlists_listWidget.currentItem().text()
+                )
+            )
         except:
             pass
+
+        # Playlist Actions
+        self.actionSave_all_to_a_playlist.triggered.connect(self.add_all_current_songs_to_a_playlist)
+        self.actionSave_Selected_to_a_Playlist.triggered.connect(self.add_song_to_playlist)
+        self.actionSave_Selected_to_a_Playlist.triggered.connect(self.add_song_to_playlist)
+        self.actionDelete_Selected_Playlist.triggered.connect(self.delete_playlist)
+        self.actionDelete_All_Playlists.triggered.connect(self.delete_all_playlist)
+
         self.show()
 
         def moveApp(event):
@@ -423,6 +457,15 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
                 )
             )
 
+    # Add all songs to favourites
+    def add_all_songs_to_favourites(self):
+        if len(songs.current_song_list) == 0:
+            QMessageBox.information(self, 'Add Songs to Favourite', 'No songs have been loaded')
+            return
+        for song in songs.current_song_list:
+            add_song_to_database_table(song, 'favourites')
+        self.load_favourites_into_app()
+
     # Add song to favourites
     def add_song_to_favourites(self):
         current_index = self.loaded_songs_listWidget.currentRow()
@@ -650,7 +693,45 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
         except Exception as e:
             print(f"Showing playlist content error: {e}")
 
+    # CONTEXT MENUS
+    # Playlist Context Menu
+    def playlists_context_menu(self):
+        self.playlists_listWidget.setContextMenuPolicy(Qt.ActionsContextMenu)
+        self.playlists_listWidget.addAction(self.actionLoad_Selected_Playlist)
+        separator = QAction(self)
+        separator.setSeparator(True)
+        self.playlists_listWidget.addAction(separator)
+        self.playlists_listWidget.addAction(self.actionDelete_Selected_Playlist)
+        self.playlists_listWidget.addAction(self.actionDelete_All_Playlists)
 
+    # Loaded Songs Context Menu
+    def loaded_songs_context_menu(self):
+        self.loaded_songs_listWidget.setContextMenuPolicy(Qt.ActionsContextMenu)
+        self.loaded_songs_listWidget.addAction(self.actionPlay)
+        self.loaded_songs_listWidget.addAction(self.actionPause_Unpause)
+        separator = QAction(self)
+        separator.setSeparator(True)
+        self.loaded_songs_listWidget.addAction(separator)
+        self.loaded_songs_listWidget.addAction(self.actionPrevious)
+        self.loaded_songs_listWidget.addAction(self.actionNext)
+        self.loaded_songs_listWidget.addAction(self.actionStop)
+        separator = QAction(self)
+        separator.setSeparator(True)
+        self.loaded_songs_listWidget.addAction(separator)
+        self.loaded_songs_listWidget.addAction(self.actionAdd_Selected_to_Favourites)
+        self.loaded_songs_listWidget.addAction(self.actionAdd_all_to_Favouries)
+        self.loaded_songs_listWidget.addAction(self.actionAdd_all_to_Favouries)
+        separator = QAction(self)
+        separator.setSeparator(True)
+        self.loaded_songs_listWidget.addAction(separator)
+        self.loaded_songs_listWidget.addAction(self.actionSave_Selected_to_a_Playlist)
+        self.loaded_songs_listWidget.addAction(self.actionSave_all_to_a_playlist)
+
+    # Favourite songs context menu
+    def favourite_songs_context_menu(self):
+        self.favourites_listWidget.setContextMenuPolicy(Qt.ActionsContextMenu)
+        self.favourites_listWidget.addAction(self.actionRemove_Selected_Favourite)
+        self.favourites_listWidget.addAction(self.actionRemove_All_Favourites)
 
     # Load playlists into app
     def load_playlists(self):
@@ -664,3 +745,16 @@ class AdvancedMusicPlayer(QMainWindow, Ui_MusicApp):
                     playlist
                 )
             )
+
+    # Slideshow
+    def slideshow(self):
+        images_path = os.path.join(os.getcwd(), os.path.join('utils', 'bg_imgs'))
+        images = os.listdir(images_path)
+        images.remove('bg_overlay.png')
+        global slide_index
+        if slide_index == len(images):
+            slide_index = 0
+        next_slide = images[slide_index]
+        next_image = QtGui.QPixmap(os.path.join(images_path, f'{next_slide}'))
+        self.background_image.setPixmap(next_image)
+        slide_index += 1
